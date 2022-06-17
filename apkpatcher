@@ -731,9 +731,7 @@ class Patcher:
 
         self.create_security_config_xml(base_path)
 
-    def manifest_set_extract_native_libs_true(self, base_dir):
-        #android:extractNativeLibs
-        self.print_info('Making sure the manifest has extract native libs set to true (frida-gadget is compressed will not work otherwise)...')
+    def manifest_set_app_attribute_to_value(self, base_dir, attribute, value):
         manifest_path = os.path.join(base_dir, 'AndroidManifest.xml')
         if not os.path.isfile(manifest_path):
             self.print_warn("Couldn't find the Manifest file. Something is wrong with the apk!")
@@ -744,7 +742,7 @@ class Patcher:
         manifest_content = f.read()
         f.close()
 
-        existingExtractNativeTag = manifest_content.find('android:extractNativeLibs')
+        existingExtractNativeTag = manifest_content.find(f'android:{attribute}')
 
         if existingExtractNativeTag != -1: #need to remove current setting
             existingEnd1 = manifest_content.find('>', existingExtractNativeTag) #if the last tag
@@ -752,7 +750,7 @@ class Patcher:
             if existingEnd1 == -1 or (existingEnd2 < existingEnd1 and existingEnd2 != -1):
                 existingEnd1=existingEnd2
             if existingEnd1 == -1:
-                self.print_warn('Could not find end of android:extractNativeLibs tag. Something is wrong with the manifest!')
+                self.print_warn(f'Could not find end of android:{attribute} tag. Something is wrong with the manifest!')
                 return False
             manifest_content = manifest_content[:existingExtractNativeTag] + manifest_content[existingEnd1:]
         appStart = '<application'
@@ -760,10 +758,15 @@ class Patcher:
         if applicationTag == -1:
             self.print_warn('Could not find application tag. Something is wrong with the manifest!')
             return False
-        manifest_content = manifest_content[:applicationTag] + f'{appStart} android:extractNativeLibs="true"' + manifest_content[applicationTag+len(appStart):]
+        manifest_content = manifest_content[:applicationTag] + f'{appStart} android:{attribute}="{value}"' + manifest_content[applicationTag+len(appStart):]
         f = open(manifest_path, 'w')
         f.write(manifest_content)
         f.close()
+
+    def manifest_set_extract_native_libs_true(self, base_dir):
+        self.print_info('Making sure the manifest has extract native libs set to true (frida-gadget is compressed will not work otherwise)...')
+        self.manifest_set_app_attribute_to_value(base_dir, 'extractNativeLibs', 'true')
+        
 
 
     def inject_permission_manifest(self, base_dir, permission):
@@ -910,6 +913,7 @@ def main():
     parser.add_argument('--no-patch-main', help='Avoid patching the main entrypoint, for mutli-apk packages this may be needed on the arch lib apks',  action='store_true')
     #, good also on multi-apk packages for just installing the lib on aux apks
     parser.add_argument('--install-apk', help="Install the apk if successful, not for multi-apk packages", action='store_true')
+    parser.add_argument('--set-apk-debuggable', help="Set the apk to debuggable", action='store_true')
     parser.add_argument('--just-sign', help="Just sign the apk incase of multi-apk packages for signing un-modified ones with same sig", action='store_true')
     parser.add_argument('-w', '--wait-before-repackage', help='Waits for your OK before repackage the apk',
                         action='store_true')
@@ -998,6 +1002,9 @@ def main():
 
 
     patcher.extract_apk(apk_file_path, temporary_path, extract_resources=must_extract_resources)
+
+    if args.set_apk_debuggable:
+        patcher.manifest_set_app_attribute_to_value(temporary_path, 'debuggable', 'true')
 
     if not args.prevent_frida_gadget and not has_internet_permission:
         patcher.inject_permission_manifest(temporary_path, patcher.INTERNET_PERMISSION)
